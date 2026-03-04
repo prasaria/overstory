@@ -31,6 +31,16 @@ import type {
 } from "./types.ts";
 
 /**
+ * Fallback map for bare model aliases when no ANTHROPIC_DEFAULT_*_MODEL env var is set.
+ * Used by buildDirectSpawn() to resolve short names to concrete model IDs.
+ */
+const SAPLING_ALIAS_FALLBACKS: Record<string, string> = {
+	haiku: "claude-haiku-4-5-20251001",
+	sonnet: "claude-sonnet-4-6-20251015",
+	opus: "claude-opus-4-6-20251015",
+};
+
+/**
  * Bash patterns that modify files and require path boundary validation
  * for implementation agents (builder/merger). Mirrors the constant in pi-guards.ts.
  */
@@ -251,11 +261,20 @@ export class SaplingRuntime implements AgentRuntime {
 		// through a gateway, the real model ID is in the env vars. Sapling passes
 		// --model directly to the SDK, so it needs the actual model ID, not the alias.
 		let model = opts.model;
+		let resolved = false;
 		if (opts.env) {
 			const aliasKey = `ANTHROPIC_DEFAULT_${model.toUpperCase()}_MODEL`;
-			const resolved = opts.env[aliasKey];
-			if (resolved) {
-				model = resolved;
+			const envResolved = opts.env[aliasKey];
+			if (envResolved) {
+				model = envResolved;
+				resolved = true;
+			}
+		}
+		// Fallback: bare aliases (haiku/sonnet/opus) with no gateway env var → concrete model ID.
+		if (!resolved) {
+			const fallback = SAPLING_ALIAS_FALLBACKS[model];
+			if (fallback !== undefined) {
+				model = fallback;
 			}
 		}
 
@@ -482,6 +501,16 @@ export class SaplingRuntime implements AgentRuntime {
 		// Force SDK backend when a gateway provider is configured.
 		if (providerEnv.ANTHROPIC_AUTH_TOKEN || providerEnv.ANTHROPIC_BASE_URL) {
 			env.SAPLING_BACKEND = "sdk";
+		}
+
+		// Forward model alias env vars so buildDirectSpawn can resolve gateway-routed models.
+		// resolveProviderEnv sets ANTHROPIC_DEFAULT_<ALIAS>_MODEL (e.g. ANTHROPIC_DEFAULT_SONNET_MODEL)
+		// to point to the real model ID behind the gateway. Without forwarding these,
+		// buildDirectSpawn cannot find the real model ID and falls back to the bare alias.
+		for (const [key, value] of Object.entries(providerEnv)) {
+			if (key.startsWith("ANTHROPIC_DEFAULT_") && key.endsWith("_MODEL")) {
+				env[key] = value;
+			}
 		}
 
 		return env;

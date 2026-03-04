@@ -276,6 +276,62 @@ describe("SaplingRuntime", () => {
 			const argv = runtime.buildDirectSpawn(opts);
 			expect(argv[3]).toBe("claude-haiku-4-5");
 		});
+
+		test("bare alias 'haiku' with no env var resolves via fallback map", () => {
+			const opts: DirectSpawnOpts = {
+				model: "haiku",
+				cwd: "/project/worktree",
+				env: {},
+				instructionPath: "/project/worktree/SAPLING.md",
+			};
+			const argv = runtime.buildDirectSpawn(opts);
+			expect(argv[3]).toBe("claude-haiku-4-5-20251001");
+		});
+
+		test("bare alias 'sonnet' with no env var resolves via fallback map", () => {
+			const opts: DirectSpawnOpts = {
+				model: "sonnet",
+				cwd: "/project/worktree",
+				env: {},
+				instructionPath: "/project/worktree/SAPLING.md",
+			};
+			const argv = runtime.buildDirectSpawn(opts);
+			expect(argv[3]).toBe("claude-sonnet-4-6-20251015");
+		});
+
+		test("bare alias 'opus' with no env var resolves via fallback map", () => {
+			const opts: DirectSpawnOpts = {
+				model: "opus",
+				cwd: "/project/worktree",
+				env: {},
+				instructionPath: "/project/worktree/SAPLING.md",
+			};
+			const argv = runtime.buildDirectSpawn(opts);
+			expect(argv[3]).toBe("claude-opus-4-6-20251015");
+		});
+
+		test("gateway env takes precedence over fallback map for alias", () => {
+			const opts: DirectSpawnOpts = {
+				model: "sonnet",
+				cwd: "/project/worktree",
+				env: { ANTHROPIC_DEFAULT_SONNET_MODEL: "google/gemini-2.0-flash" },
+				instructionPath: "/project/worktree/SAPLING.md",
+			};
+			const argv = runtime.buildDirectSpawn(opts);
+			// Gateway env wins, not the fallback
+			expect(argv[3]).toBe("google/gemini-2.0-flash");
+		});
+
+		test("direct model ID is not affected by fallback map", () => {
+			const opts: DirectSpawnOpts = {
+				model: "claude-sonnet-4-6",
+				cwd: "/project/worktree",
+				env: {},
+				instructionPath: "/project/worktree/SAPLING.md",
+			};
+			const argv = runtime.buildDirectSpawn(opts);
+			expect(argv[3]).toBe("claude-sonnet-4-6");
+		});
 	});
 
 	describe("buildEnv", () => {
@@ -348,6 +404,50 @@ describe("SaplingRuntime", () => {
 			expect(env.SAPLING_BACKEND).toBe("sdk");
 			expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test");
 			expect(env.ANTHROPIC_BASE_URL).toBe("https://gateway.example.com");
+		});
+
+		test("forwards ANTHROPIC_DEFAULT_SONNET_MODEL from model.env", () => {
+			const model: ResolvedModel = {
+				model: "sonnet",
+				env: {
+					ANTHROPIC_AUTH_TOKEN: "sk-ant-test",
+					ANTHROPIC_DEFAULT_SONNET_MODEL: "google/gemini-2.0-flash",
+				},
+			};
+			const env = runtime.buildEnv(model);
+			expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("google/gemini-2.0-flash");
+		});
+
+		test("forwards any ANTHROPIC_DEFAULT_*_MODEL pattern from model.env", () => {
+			const model: ResolvedModel = {
+				model: "opus",
+				env: {
+					ANTHROPIC_DEFAULT_OPUS_MODEL: "custom/opus-gateway-model",
+					ANTHROPIC_DEFAULT_HAIKU_MODEL: "custom/haiku-gateway-model",
+				},
+			};
+			const env = runtime.buildEnv(model);
+			expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("custom/opus-gateway-model");
+			expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("custom/haiku-gateway-model");
+		});
+
+		test("does NOT forward non-model env vars from model.env", () => {
+			const model: ResolvedModel = {
+				model: "sonnet",
+				env: {
+					ANTHROPIC_AUTH_TOKEN: "sk-ant-test",
+					ANTHROPIC_DEFAULT_SONNET_MODEL: "google/gemini-2.0-flash",
+					SOME_OTHER_VAR: "should-not-appear",
+					ANTHROPIC_DEFAULT_SONNET_ALIAS: "also-should-not-appear",
+				},
+			};
+			const env = runtime.buildEnv(model);
+			// Non-provider vars are not forwarded
+			expect("SOME_OTHER_VAR" in env).toBe(false);
+			// Vars matching ANTHROPIC_DEFAULT_* but NOT ending in _MODEL are not forwarded
+			expect("ANTHROPIC_DEFAULT_SONNET_ALIAS" in env).toBe(false);
+			// The one ending in _MODEL IS forwarded
+			expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("google/gemini-2.0-flash");
 		});
 	});
 
