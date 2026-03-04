@@ -2,10 +2,10 @@
 // Implements the AgentRuntime contract for the OpenAI `codex` CLI.
 //
 // Key differences from Claude/Pi adapters:
-// - Headless: `codex exec` exits on completion (no persistent TUI)
+// - Interactive: `codex` (without `exec`) stays alive in tmux for orchestration
 // - Instruction file: AGENTS.md (not .claude/CLAUDE.md)
 // - No hooks: Codex uses OS-level sandbox (Seatbelt/Landlock)
-// - Events: NDJSON stream to stdout (parsed for token usage)
+// - One-shot calls still use `codex exec` (buildPrintCommand)
 
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -22,9 +22,9 @@ import type {
 /**
  * Codex runtime adapter.
  *
- * Implements AgentRuntime for the OpenAI `codex` CLI. Codex agents run in
- * headless mode (`codex exec`) — they process a task and exit, rather than
- * maintaining a persistent TUI like Claude Code or Pi.
+ * Implements AgentRuntime for the OpenAI `codex` CLI. Tmux-spawned Codex
+ * agents run in interactive mode (`codex`) so sessions stay alive and can be
+ * nudged via tmux.
  *
  * Security is enforced via Codex's OS-level sandbox (Seatbelt on macOS,
  * Landlock on Linux) rather than hook-based guards. The `--full-auto` flag
@@ -41,10 +41,16 @@ export class CodexRuntime implements AgentRuntime {
 	readonly instructionPath = "AGENTS.md";
 
 	/**
+	 * Anthropic aliases used by overstory manifests that Codex CLI does not
+	 * accept as --model values.
+	 */
+	private static readonly MANIFEST_ALIASES = new Set(["sonnet", "opus", "haiku"]);
+
+	/**
 	 * Build the shell command string to spawn a Codex agent in a tmux pane.
 	 *
-	 * Uses `codex exec` (headless mode) with `--full-auto` for workspace-write
-	 * sandbox + automatic approvals, and `--json` for NDJSON event output.
+	 * Uses interactive `codex` with `--full-auto` for workspace-write sandbox +
+	 * automatic approvals.
 	 *
 	 * The prompt directs the agent to read AGENTS.md for its full instructions.
 	 * If `appendSystemPrompt` or `appendSystemPromptFile` is provided, the
@@ -56,7 +62,12 @@ export class CodexRuntime implements AgentRuntime {
 	 * @returns Shell command string suitable for tmux new-session -c
 	 */
 	buildSpawnCommand(opts: SpawnOpts): string {
-		let cmd = `codex exec --full-auto --json --model ${opts.model}`;
+		// When model comes from default manifest aliases (sonnet/opus/haiku),
+		// omit --model so Codex uses the user's configured default model.
+		let cmd = "codex --full-auto";
+		if (!CodexRuntime.MANIFEST_ALIASES.has(opts.model)) {
+			cmd += ` --model ${opts.model}`;
+		}
 
 		if (opts.appendSystemPromptFile) {
 			// Read role definition from file at shell expansion time — avoids tmux
@@ -128,11 +139,7 @@ export class CodexRuntime implements AgentRuntime {
 	}
 
 	/**
-	 * Codex exec is headless — always ready.
-	 *
-	 * Unlike Claude Code and Pi which maintain persistent TUI sessions,
-	 * `codex exec` starts processing immediately and exits on completion.
-	 * No TUI readiness detection is needed.
+	 * Codex interactive startup is treated as ready once a pane exists.
 	 *
 	 * @param _paneContent - Captured tmux pane content (unused)
 	 * @returns Always `{ phase: "ready" }`
@@ -144,9 +151,7 @@ export class CodexRuntime implements AgentRuntime {
 	/**
 	 * Codex does not require beacon verification/resend.
 	 *
-	 * The beacon verification loop exists because Claude Code's TUI sometimes
-	 * swallows the initial Enter during late initialization. Codex exec is
-	 * headless — it processes the prompt immediately with no TUI startup delay.
+	 * Codex accepts startup input reliably once spawned.
 	 */
 	requiresBeaconVerification(): boolean {
 		return false;

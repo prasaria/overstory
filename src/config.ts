@@ -698,9 +698,13 @@ function validateConfig(config: OverstoryConfig): void {
 		}
 	}
 
-	// models: validate each value — accepts aliases and provider-prefixed refs
+	// models: validate each value.
+	// - Standard runtimes: aliases (sonnet/opus/haiku) or provider-prefixed refs.
+	// - Codex runtime: also allow bare model refs (e.g. gpt-5.3-codex).
 	const validAliases = ["sonnet", "opus", "haiku"];
 	const toolHeavyRoles = ["builder", "scout"];
+	const defaultRuntime = config.runtime?.default ?? "claude";
+	const allowBareModelRefs = defaultRuntime === "codex";
 	for (const [role, model] of Object.entries(config.models)) {
 		if (model === undefined) continue;
 		if (model.includes("/")) {
@@ -721,8 +725,16 @@ function validateConfig(config: OverstoryConfig): void {
 				);
 			}
 		} else {
-			// Must be a valid alias
+			// Must be a valid alias unless codex runtime is active.
 			if (!validAliases.includes(model)) {
+				if (allowBareModelRefs) {
+					if (toolHeavyRoles.includes(role)) {
+						process.stderr.write(
+							`[overstory] WARNING: models.${role} uses non-Anthropic model '${model}'. Tool-use compatibility cannot be verified at config time.\n`,
+						);
+					}
+					continue;
+				}
 				throw new ValidationError(
 					`models.${role} must be a valid alias (${validAliases.join(", ")}) or a provider-prefixed ref (e.g., openrouter/openai/gpt-4)`,
 					{

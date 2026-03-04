@@ -691,6 +691,39 @@ models:
 		expect((err as ValidationError).message).toContain("provider-prefixed ref");
 	});
 
+	test("accepts bare model name when runtime.default is codex", async () => {
+		await writeConfig(`
+runtime:
+  default: codex
+models:
+  coordinator: gpt-5.3-codex
+`);
+		const config = await loadConfig(tempDir);
+		expect(config.models.coordinator).toBe("gpt-5.3-codex");
+	});
+
+	test("warns on bare non-Anthropic model in tool-heavy role when runtime.default is codex", async () => {
+		await writeConfig(`
+runtime:
+  default: codex
+models:
+  builder: gpt-5.3-codex
+`);
+		const origWrite = process.stderr.write;
+		let capturedStderr = "";
+		process.stderr.write = ((s: string | Uint8Array) => {
+			if (typeof s === "string") capturedStderr += s;
+			return true;
+		}) as typeof process.stderr.write;
+		try {
+			await loadConfig(tempDir);
+		} finally {
+			process.stderr.write = origWrite;
+		}
+		expect(capturedStderr).toContain("WARNING: models.builder uses non-Anthropic model");
+		expect(capturedStderr).toContain("gpt-5.3-codex");
+	});
+
 	test("warns on non-Anthropic model in tool-heavy role", async () => {
 		await writeConfig(`
 providers:

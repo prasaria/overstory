@@ -20,7 +20,7 @@ describe("CodexRuntime", () => {
 	});
 
 	describe("buildSpawnCommand", () => {
-		test("basic command uses codex exec with --full-auto and --json", () => {
+		test("basic command uses interactive codex with --full-auto", () => {
 			const opts: SpawnOpts = {
 				model: "gpt-5-codex",
 				permissionMode: "bypass",
@@ -28,9 +28,23 @@ describe("CodexRuntime", () => {
 				env: {},
 			};
 			const cmd = runtime.buildSpawnCommand(opts);
-			expect(cmd).toContain("codex exec --full-auto --json");
+			expect(cmd).toContain("codex --full-auto");
 			expect(cmd).toContain("--model gpt-5-codex");
 			expect(cmd).toContain("Read AGENTS.md");
+		});
+
+		test("manifest aliases omit --model so codex uses default configured model", () => {
+			for (const alias of ["sonnet", "opus", "haiku"]) {
+				const opts: SpawnOpts = {
+					model: alias,
+					permissionMode: "bypass",
+					cwd: "/tmp/worktree",
+					env: {},
+				};
+				const cmd = runtime.buildSpawnCommand(opts);
+				expect(cmd).toContain("codex --full-auto");
+				expect(cmd).not.toContain(" --model ");
+			}
 		});
 
 		test("permissionMode is NOT included in command (Codex uses OS sandbox)", () => {
@@ -146,7 +160,7 @@ describe("CodexRuntime", () => {
 			};
 			const cmd = runtime.buildSpawnCommand(opts);
 			expect(cmd).toBe(
-				"codex exec --full-auto --json --model gpt-5-codex 'Read AGENTS.md for your task assignment and begin immediately.'",
+				"codex --full-auto --model gpt-5-codex 'Read AGENTS.md for your task assignment and begin immediately.'",
 			);
 		});
 
@@ -254,7 +268,7 @@ describe("CodexRuntime", () => {
 	});
 
 	describe("detectReady", () => {
-		test("returns ready for empty pane (headless — always ready)", () => {
+		test("returns ready for empty pane", () => {
 			const state = runtime.detectReady("");
 			expect(state).toEqual({ phase: "ready" });
 		});
@@ -279,7 +293,7 @@ describe("CodexRuntime", () => {
 	});
 
 	describe("requiresBeaconVerification", () => {
-		test("returns false (headless — no beacon needed)", () => {
+		test("returns false (no beacon verification needed)", () => {
 			expect(runtime.requiresBeaconVerification()).toBe(false);
 		});
 	});
@@ -664,7 +678,7 @@ describe("CodexRuntime integration: spawn command structure", () => {
 			env: { OVERSTORY_AGENT_NAME: "builder-1" },
 		});
 		expect(cmd).toBe(
-			"codex exec --full-auto --json --model gpt-5-codex 'Read AGENTS.md for your task assignment and begin immediately.'",
+			"codex --full-auto --model gpt-5-codex 'Read AGENTS.md for your task assignment and begin immediately.'",
 		);
 	});
 
@@ -677,7 +691,7 @@ describe("CodexRuntime integration: spawn command structure", () => {
 			appendSystemPrompt: baseDefinition,
 			env: { OVERSTORY_AGENT_NAME: "coordinator" },
 		});
-		expect(cmd).toContain("codex exec --full-auto --json --model gpt-5-codex");
+		expect(cmd).toContain("codex --full-auto --model gpt-5-codex");
 		expect(cmd).toContain("# Coordinator");
 		expect(cmd).toContain("You are the coordinator agent.");
 		expect(cmd).toContain("Read AGENTS.md");
@@ -691,7 +705,7 @@ describe("CodexRuntime integration: spawn command structure", () => {
 			appendSystemPromptFile: "/project/.overstory/agent-defs/coordinator.md",
 			env: { OVERSTORY_AGENT_NAME: "coordinator" },
 		});
-		expect(cmd).toContain("codex exec --full-auto --json --model gpt-5-codex");
+		expect(cmd).toContain("codex --full-auto --model gpt-5-codex");
 		expect(cmd).toContain("$(cat '/project/.overstory/agent-defs/coordinator.md')");
 		expect(cmd).toContain("Read AGENTS.md");
 	});
