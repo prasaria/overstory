@@ -58,7 +58,11 @@ export function getAllRuntimes(): AgentRuntime[] {
  * @throws {Error} If the resolved runtime name is not registered.
  * @returns A fresh AgentRuntime instance.
  */
-export function getRuntime(name?: string, config?: OverstoryConfig, capability?: string): AgentRuntime {
+export function getRuntime(
+	name?: string,
+	config?: OverstoryConfig,
+	capability?: string,
+): AgentRuntime {
 	const capabilityRuntime =
 		capability && config?.runtime?.capabilities
 			? config.runtime.capabilities[capability]

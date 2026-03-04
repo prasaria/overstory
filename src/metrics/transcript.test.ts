@@ -15,7 +15,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanupTempDir } from "../test-helpers.ts";
-import { getPricingForModel, estimateCost } from "./pricing.ts";
+import { estimateCost, getPricingForModel } from "./pricing.ts";
 import { parseTranscriptUsage } from "./transcript.ts";
 
 let tempDir: string;

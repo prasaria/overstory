@@ -709,10 +709,10 @@ function validateConfig(config: OverstoryConfig): void {
 	if (config.runtime?.capabilities) {
 		for (const [cap, runtimeName] of Object.entries(config.runtime.capabilities)) {
 			if (runtimeName !== undefined && (typeof runtimeName !== "string" || runtimeName === "")) {
-				throw new ValidationError(
-					`runtime.capabilities.${cap} must be a non-empty string`,
-					{ field: `runtime.capabilities.${cap}`, value: runtimeName },
-				);
+				throw new ValidationError(`runtime.capabilities.${cap} must be a non-empty string`, {
+					field: `runtime.capabilities.${cap}`,
+					value: runtimeName,
+				});
 			}
 		}
 	}
