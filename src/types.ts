@@ -20,6 +20,8 @@ export interface ProviderConfig {
 export interface ResolvedModel {
 	model: string;
 	env?: Record<string, string>;
+	/** True when the model was explicitly set via config.models[capability]. */
+	isExplicitOverride?: boolean;
 }
 
 /** Configuration for the Pi runtime's model alias expansion. */

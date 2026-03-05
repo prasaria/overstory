@@ -876,7 +876,7 @@ export async function slingCommand(taskId: string, opts: SlingOptions): Promise<
 			const argv = runtime.buildDirectSpawn({
 				cwd: worktreePath,
 				env: directEnv,
-				model: resolvedModel.model,
+				...(resolvedModel.isExplicitOverride ? { model: resolvedModel.model } : {}),
 				instructionPath: runtime.instructionPath,
 			});
 
