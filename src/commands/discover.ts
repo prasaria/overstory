@@ -1,19 +1,16 @@
 /**
  * CLI command: ov discover
  *
- * Spawns scout agents with the ov-discovery canopy profile to explore a
- * brownfield codebase and produce structured mulch records. Each category
- * runs as a parallel scout agent assigned to a focused research area.
+ * Launches a coordinator session with the ov-discovery profile to explore a
+ * brownfield codebase and produce structured mulch records. The coordinator
+ * autonomously spawns leads, which spawn scouts per category, synthesizes
+ * results, and writes mulch records.
  */
 
-import { join } from "node:path";
 import { Command } from "commander";
-import { loadConfig } from "../config.ts";
 import { ValidationError } from "../errors.ts";
-import { jsonOutput } from "../json.ts";
-import { accent, muted, printSuccess } from "../logging/color.ts";
-import { createMailClient } from "../mail/client.ts";
-import { createMailStore } from "../mail/store.ts";
+import type { CoordinatorDeps, CoordinatorSessionOptions } from "./coordinator.ts";
+import { startCoordinatorSession } from "./coordinator.ts";
 
 /** A single discovery category with its research focus. */
 export interface DiscoveryCategory {
@@ -65,13 +62,17 @@ export interface DiscoverOptions {
 	skip?: string;
 	name?: string;
 	taskId?: string;
+	attach?: boolean;
+	watchdog?: boolean;
 	json?: boolean;
 }
 
-interface SpawnResult {
-	category: string;
-	success: boolean;
-	error?: string;
+/** Dependency injection for discoverCommand. Used in tests. */
+export interface DiscoverDeps {
+	_startCoordinatorSession?: (
+		opts: CoordinatorSessionOptions,
+		deps: CoordinatorDeps,
+	) => Promise<void>;
 }
 
 /** Parse and validate the --skip option, returning a set of category names to skip. */
@@ -91,24 +92,42 @@ function parseSkipCategories(skip: string | undefined): Set<string> {
 }
 
 /**
- * Build the ov sling args for a single discovery scout.
- * Exported for unit testing without side effects.
+ * Build the discovery beacon — the initial prompt sent to the discover coordinator
+ * after Claude Code initializes. Instructs it to spawn one lead per category.
+ */
+export function buildDiscoveryBeacon(
+	categories: DiscoveryCategory[],
+	coordinatorName: string,
+): string {
+	const timestamp = new Date().toISOString();
+	const categoryNames = categories.map((c) => c.name).join(", ");
+	const categoryDetails = categories.map((c) => `${c.name}: ${c.body}`).join(" | ");
+	const parts = [
+		`[OVERSTORY] ${coordinatorName} (coordinator) ${timestamp}`,
+		`Role: discovery coordinator | Categories: ${categoryNames}`,
+		`Startup: run mulch prime, then spawn one lead per active category. Each lead spawns a scout to explore its category area. After all scouts report back, synthesize findings into mulch records.`,
+		`Categories: ${categoryDetails}`,
+	];
+	return parts.join(" — ");
+}
+
+/**
+ * Build the scout args for a given discovery category and task ID.
+ * Kept for reference and for callers that need per-category sling arguments.
  */
 export function buildScoutArgs(
+	category: DiscoveryCategory,
 	taskId: string,
-	categoryName: string,
 	parentName: string,
-	totalCategories: number,
 ): string[] {
-	const scoutTaskId = `${taskId}-${categoryName}`;
 	return [
 		"ov",
 		"sling",
-		scoutTaskId,
+		taskId,
 		"--capability",
 		"scout",
 		"--name",
-		`discover-${categoryName}`,
+		`discover-${category.name}`,
 		"--profile",
 		"ov-discovery",
 		"--parent",
@@ -116,16 +135,16 @@ export function buildScoutArgs(
 		"--depth",
 		"1",
 		"--skip-task-check",
-		"--max-agents",
-		String(totalCategories),
 	];
 }
 
 /** Main handler for ov discover. */
-export async function discoverCommand(opts: DiscoverOptions): Promise<void> {
+export async function discoverCommand(
+	opts: DiscoverOptions,
+	deps: DiscoverDeps = {},
+): Promise<void> {
 	const json = opts.json ?? false;
-	const parentName = opts.name ?? "discover";
-	const taskId = opts.taskId ?? `discover-${Date.now()}`;
+	const coordinatorName = opts.name ?? "discover-coordinator";
 
 	// Validate and parse skip list
 	const skipSet = parseSkipCategories(opts.skip);
@@ -135,107 +154,49 @@ export async function discoverCommand(opts: DiscoverOptions): Promise<void> {
 		throw new ValidationError("All categories skipped — nothing to discover.");
 	}
 
-	// Load config to find project root for mail db
-	const config = await loadConfig(process.cwd());
-	const projectRoot = config.project.root;
-	const mailDbPath = join(projectRoot, ".overstory", "mail.db");
-	const mailStore = createMailStore(mailDbPath);
-	const mailClient = createMailClient(mailStore);
+	const attach = opts.attach !== undefined ? opts.attach : !!process.stdout.isTTY;
 
-	const results: SpawnResult[] = [];
+	const startSession = deps._startCoordinatorSession ?? startCoordinatorSession;
 
-	try {
-		for (const category of categories) {
-			const agentName = `discover-${category.name}`;
-			const args = buildScoutArgs(taskId, category.name, parentName, categories.length);
-
-			const proc = Bun.spawn(args, {
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			const exitCode = await proc.exited;
-
-			if (exitCode !== 0) {
-				const stderr = await new Response(proc.stderr).text();
-				results.push({
-					category: category.name,
-					success: false,
-					error: stderr.trim() || `exit code ${exitCode}`,
-				});
-				process.stderr.write(
-					`  ${muted("!")} Failed to spawn ${accent(agentName)}: ${stderr.trim()}\n`,
-				);
-				continue;
-			}
-
-			// Send dispatch mail with research focus
-			mailClient.send({
-				from: parentName,
-				to: agentName,
-				subject: category.subject,
-				body: category.body,
-				type: "dispatch",
-			});
-
-			results.push({ category: category.name, success: true });
-		}
-	} finally {
-		mailStore.close();
-	}
-
-	const succeeded = results.filter((r) => r.success);
-	const failed = results.filter((r) => !r.success);
-
-	if (json) {
-		jsonOutput("discover", {
-			taskId,
-			parentName,
-			categories: results,
-			summary: {
-				total: results.length,
-				spawned: succeeded.length,
-				failed: failed.length,
-			},
-		});
-		return;
-	}
-
-	// Human-readable output
-	printSuccess(`Discovery swarm launched`, taskId);
-	process.stdout.write(`\n`);
-	process.stdout.write(`  ${muted("Task ID:")}  ${accent(taskId)}\n`);
-	process.stdout.write(`  ${muted("Parent: ")}  ${accent(parentName)}\n`);
-	process.stdout.write(`  ${muted("Scouts: ")}  ${succeeded.length} spawned`);
-	if (failed.length > 0) {
-		process.stdout.write(`, ${failed.length} failed`);
-	}
-	process.stdout.write(`\n\n`);
-
-	for (const r of results) {
-		const icon = r.success ? "✓" : "✗";
-		process.stdout.write(`  ${r.success ? accent(icon) : muted(icon)} discover-${r.category}\n`);
-	}
-
-	process.stdout.write(`\n`);
-	process.stdout.write(`${muted("Monitor progress:")}\n`);
-	process.stdout.write(`  ${muted("$")} ov status\n`);
-	process.stdout.write(`\n`);
-	process.stdout.write(`${muted("Review results when complete:")}\n`);
-	process.stdout.write(`  ${muted("$")} ml prime\n`);
+	await startSession(
+		{
+			json,
+			attach,
+			watchdog: opts.watchdog ?? false,
+			monitor: false,
+			profile: "ov-discovery",
+			coordinatorName,
+			beaconBuilder: (_trackerCli) => buildDiscoveryBeacon(categories, coordinatorName),
+		},
+		{},
+	);
 }
 
 /** Commander command factory. */
 export function createDiscoverCommand(): Command {
 	return new Command("discover")
-		.description("Discover a brownfield codebase via scout swarm")
+		.description("Discover a brownfield codebase via coordinator-driven scout swarm")
 		.option(
 			"--skip <categories>",
 			"Skip specific categories (comma-separated: architecture,dependencies,testing,apis,config,implicit)",
 		)
-		.option("--name <name>", "Parent agent name (default: discover)")
-		.option("--task-id <id>", "Task ID for the discovery swarm (default: auto-generated)")
+		.option("--name <name>", "Coordinator agent name (default: discover-coordinator)")
+		.option("--task-id <id>", "Task ID (unused — kept for backward compatibility)")
+		.option("--attach", "Always attach to tmux session after start")
+		.option("--no-attach", "Never attach to tmux session after start")
+		.option("--watchdog", "Auto-start watchdog daemon with coordinator")
 		.option("--json", "Output as JSON")
-		.action(async (opts: DiscoverOptions) => {
-			await discoverCommand(opts);
-		});
+		.action(
+			async (opts: {
+				skip?: string;
+				name?: string;
+				taskId?: string;
+				attach?: boolean;
+				watchdog?: boolean;
+				json?: boolean;
+			}) => {
+				const attach = opts.attach !== undefined ? opts.attach : !!process.stdout.isTTY;
+				await discoverCommand({ ...opts, attach });
+			},
+		);
 }
