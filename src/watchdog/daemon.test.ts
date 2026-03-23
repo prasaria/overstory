@@ -1001,7 +1001,11 @@ describe("daemon event recording", () => {
 				nudgeIntervalMs: 60_000,
 				tier1Enabled: true,
 				_tmux: tmuxWithLiveness({ "overstory-stalled-agent": true }),
-				_triage: async () => ({ verdict: "extend" as const, fallback: true, reason: "Claude unavailable" }),
+				_triage: async () => ({
+					verdict: "extend" as const,
+					fallback: true,
+					reason: "Claude unavailable",
+				}),
 				_nudge: nudgeTracker().nudge,
 				_eventStore: eventStore,
 			});
@@ -2411,10 +2415,42 @@ describe("triage concurrency limit (_maxTriagePerTick)", () => {
 
 		// 4 sessions all at escalation level 2
 		const sessions: AgentSession[] = [
-			makeSession({ id: "s-1", agentName: "agent-1", tmuxSession: "ov-agent-1", state: "stalled", lastActivity: staleActivity, escalationLevel: 2, stalledSince }),
-			makeSession({ id: "s-2", agentName: "agent-2", tmuxSession: "ov-agent-2", state: "stalled", lastActivity: staleActivity, escalationLevel: 2, stalledSince }),
-			makeSession({ id: "s-3", agentName: "agent-3", tmuxSession: "ov-agent-3", state: "stalled", lastActivity: staleActivity, escalationLevel: 2, stalledSince }),
-			makeSession({ id: "s-4", agentName: "agent-4", tmuxSession: "ov-agent-4", state: "stalled", lastActivity: staleActivity, escalationLevel: 2, stalledSince }),
+			makeSession({
+				id: "s-1",
+				agentName: "agent-1",
+				tmuxSession: "ov-agent-1",
+				state: "stalled",
+				lastActivity: staleActivity,
+				escalationLevel: 2,
+				stalledSince,
+			}),
+			makeSession({
+				id: "s-2",
+				agentName: "agent-2",
+				tmuxSession: "ov-agent-2",
+				state: "stalled",
+				lastActivity: staleActivity,
+				escalationLevel: 2,
+				stalledSince,
+			}),
+			makeSession({
+				id: "s-3",
+				agentName: "agent-3",
+				tmuxSession: "ov-agent-3",
+				state: "stalled",
+				lastActivity: staleActivity,
+				escalationLevel: 2,
+				stalledSince,
+			}),
+			makeSession({
+				id: "s-4",
+				agentName: "agent-4",
+				tmuxSession: "ov-agent-4",
+				state: "stalled",
+				lastActivity: staleActivity,
+				escalationLevel: 2,
+				stalledSince,
+			}),
 		];
 
 		writeSessionsToStore(tempRoot, sessions);

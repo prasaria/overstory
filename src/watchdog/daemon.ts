@@ -37,7 +37,7 @@ import { openSessionStore } from "../sessions/compat.ts";
 import type { AgentSession, EventStore, HealthCheck } from "../types.ts";
 import { isProcessAlive, isSessionAlive, killProcessTree, killSession } from "../worktree/tmux.ts";
 import { evaluateHealth, transitionState } from "./health.ts";
-import { triageAgent, type TriageResult } from "./triage.ts";
+import { type TriageResult, triageAgent } from "./triage.ts";
 
 /** Maximum escalation level (terminate). */
 const MAX_ESCALATION_LEVEL = 3;
